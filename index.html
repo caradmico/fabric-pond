@@ -66,6 +66,12 @@
     }
     .rng { display: flex; justify-content: space-between; color: #6f6b63; font-size: 10px; margin-top: -2px; }
     .hidden { display: none !important; }
+    .break {
+      margin-top: 14px; padding-top: 10px; border-top: 1px solid #5a3030;
+    }
+    .break h2 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #e8a090; margin: 0 0 6px; font-weight: 650; }
+    #breakBody { margin-top: 6px; }
+    .pop.oops { background: #ff8a7a; }
   </style>
 </head>
 <body>
@@ -85,8 +91,21 @@
       <option value="glue">3. Through the wall vs around it</option>
       <option value="mode">4. Shared-mode coupler (no ∇)</option>
       <option value="mirage">5. Coarse-clock mirage</option>
+      <option value="break">6. Break physics (v > c)</option>
     </select>
     <div id="ctrls"></div>
+    <div class="break">
+      <h2>Break physics</h2>
+      <div class="tog"><input type="checkbox" id="breakOn" /> <span>unlock illegal knobs</span></div>
+      <div id="breakBody" class="hidden">
+        <label><span>signal speed v/c</span><span id="vcVal">1.0</span></label>
+        <input id="vc" type="range" min="0.2" max="3" step="0.05" value="1" />
+        <div class="rng"><span>slow</span><span>light</span><span>faster than light</span></div>
+        <div class="tog"><input type="checkbox" id="hissBit" /> <span>hiss counts as a word</span></div>
+        <div class="tog"><input type="checkbox" id="noLoc" /> <span>no locality (remote address)</span></div>
+        <div class="tog"><input type="checkbox" id="bothWay" /> <span>both-way coupler</span></div>
+      </div>
+    </div>
   </div>
   <div id="hint">drag to orbit · scroll to zoom · math is the engine, the picture is the lie detector</div>
   <script type="importmap">
@@ -128,6 +147,9 @@
     const B = new THREE.Vector3(6, 0, 0);
     const Lmap = A.distanceTo(B);
     const cLight = 8; // units/s ; light-tick τ = Lmap/cLight
+    const PHYS = { on: false, vOverC: 1, hissIsWord: false, noLocality: false, bothWays: false };
+    function cNow() { return cLight; }
+    function vNow() { return cLight * (PHYS.on ? PHYS.vOverC : 1); }
 
     function discTex() {
       const c = document.createElement('canvas'); c.width = c.height = 64;
@@ -243,16 +265,19 @@
     }
     function tickLight(t) {
       if (!state.flying) return;
-      const u = Math.min(1, (t - state.t0) / (Lmap / cLight));
+      const u = Math.min(1, (t - state.t0) / (Lmap / vNow()));
       state.ph.position.lerpVectors(A, B, u);
-      const r = u * Lmap;
-      state.cone.scale.setScalar(Math.max(0.05, r));
+      const rCone = Math.min(Lmap * 1.4, (t - state.t0) * cNow());
+      state.cone.scale.setScalar(Math.max(0.05, rCone));
       state.cone.position.copy(A);
       if (u >= 1) {
         state.flying = false; state.ph.visible = false;
         state.b.userData.halo.material.opacity = 0.7;
-        $status.textContent = `arrived · Δt = τγ · K = 1 · Coulomb Φ looked instant; E did not`;
-        popAt(B, 'Arrived on time. K=1. This is the honest baseline.', 'bob', 3500);
+        const ftl = PHYS.on && PHYS.vOverC > 1.01;
+        $status.textContent = ftl
+          ? `arrived EARLY · v/c=${PHYS.vOverC.toFixed(2)} · outside the light shell · this is the break`
+          : `arrived · Δt = τγ · K = 1 · Coulomb Φ looked instant; E did not`;
+        popAt(B, ftl ? 'Broke it. Signal beat its own light shell. A moving observer can see this as backwards.' : 'Arrived on time. K=1. This is the honest baseline.', ftl ? 'oops' : 'bob', 3800);
       }
     }
 
@@ -390,21 +415,23 @@
         const T = state.T;
         state.racing = true; state.t0 = performance.now()/1000;
         state.longDone = state.leakDone = false;
-        state.leakHit = Math.random() < Math.min(1, T * 4 + (T > 0.05 ? 0.35 : 0));
+        state.leakHit = PHYS.noLocality || PHYS.hissIsWord || Math.random() < Math.min(1, T * 4 + (T > 0.05 ? 0.35 : 0));
         state.longPh.visible = true;
         state.leakPh.visible = true;
         state.a.userData.halo.material.opacity = 0.7;
         state.b.userData.halo.material.color.setHex(0x4aa7ff);
         state.b.userData.halo.material.opacity = 0.16;
         popAt(A, 'Go. Yellow runs around. Purple tries the door.', 'alice', 2800);
-        $status.textContent = state.leakHit
+        $status.textContent = PHYS.hissIsWord
+          ? 'BREAK: hiss counts as a word · Hartman peak is being treated as a message (this is the lie)'
+          : (state.leakHit
           ? 'race on · a real click may leak through'
-          : 'race on · this time the door only hissed (no word). Watch yellow still finish.';
+          : 'race on · this time the door only hissed (no word). Watch yellow still finish.');
       };
     }
     function tickGlue(t) {
       if (!state.racing) return;
-      const tγ = Lmap / cLight;
+      const tγ = Lmap / vNow();
       const uLong = Math.min(1, (t - state.t0) / tγ);
       state.longPh.position.copy(state.curve.getPoint(uLong));
       // Hartman: leaked *shape* crosses quickly (short delay), even when no click
@@ -469,7 +496,7 @@
       document.getElementById('om').oninput = upd; upd();
       document.getElementById('kick').onclick = () => {
         state.v += 6; state.pulse = 1; state.a.userData.halo.material.opacity = 0.7;
-        const oneway = document.getElementById('oneway').checked;
+        const oneway = document.getElementById('oneway').checked && !PHYS.bothWays;
         $status.textContent = oneway
           ? `kick · Bob will follow χ in ~${state.tau.toFixed(3)}s · K≈${state.K.toFixed(1)}`
           : `kick both ways · Tolman-dangerous if a boost aims the return`;
@@ -546,7 +573,7 @@
     }
     function tickMirage(t) {
       if (!state.flying) return;
-      const τ = Lmap/cLight;
+      const τ = Lmap/vNow();
       const u = Math.min(1, (t - state.t0) / (τ * state.δ));
       state.ph.position.lerpVectors(A, B, u);
       const tickA = Math.floor((t - state.t0) / (τ * state.P));
@@ -568,7 +595,57 @@
       }
     }
 
-    const builders = { light: buildLight, zoom: buildZoom, glue: buildGlue, mode: buildMode, mirage: buildMirage };
+    function buildBreak() {
+      $title.textContent = 'Break physics';
+      $blurb.textContent = 'Legal light is the growing shell. Your signal is the moving dot. If you push v above c, the dot punches out of the shell. A second, moving observer can then see Bob happen before Alice — a closed causal loop toy.';
+      $math.textContent = 'v > c  ⇒  worldline is spacelike
+boosted frame: Δt′ = γ (Δt − v Δx / c²) can flip sign
+that is the Tolman bite';
+      plain('In English: the yellow shell is “what light has had time to reach.” If your message is outside that shell, you didn’t outrun a car — you left the map. Flip v/c above 1 in the red panel and send. Then imagine someone flying past: they can see the effect before the cause.');
+      html(`<div class="row"><button class="primary" id="go">send signal</button></div>
+        <p style="color:#e8a090;margin:8px 0 0">Use the red “Break physics” knobs. v/c > 1 is the whole point of this scene.</p>`);
+      const a = makeLab(0xff6b4a); a.position.copy(A);
+      const b = makeLab(0x4aa7ff); b.position.copy(B);
+      const cone = new THREE.Mesh(
+        new THREE.SphereGeometry(1, 28, 14),
+        new THREE.MeshBasicMaterial({ color: 0xfff1a8, transparent: true, opacity: 0.1, wireframe: true })
+      );
+      cone.position.copy(A); cone.visible = false;
+      const ph = makePhoton(); ph.visible = false;
+      layer.add(a, b, cone, ph);
+      state = { a, b, cone, ph, flying: false, t0: 0 };
+      document.getElementById('go').onclick = () => {
+        if (!PHYS.on) {
+          popAt(A, 'Unlock “break physics” first — or this is just scene 1 again.', 'warn', 3000);
+        }
+        state.flying = true; state.t0 = performance.now()/1000;
+        ph.visible = true; cone.visible = true; ph.position.copy(A);
+        a.userData.halo.material.opacity = 0.6;
+        b.userData.halo.material.opacity = 0.16;
+      };
+      popAt(A, 'Shell = light. Dot = your signal.', 'alice', 3500);
+    }
+    function tickBreak(t) {
+      if (!state.flying) return;
+      const u = Math.min(1, (t - state.t0) / (Lmap / vNow()));
+      state.ph.position.lerpVectors(A, B, u);
+      state.cone.scale.setScalar(Math.max(0.05, (t - state.t0) * cNow()));
+      const outside = PHYS.on && PHYS.vOverC > 1.01;
+      if (u >= 1) {
+        state.flying = false; state.ph.visible = false;
+        state.b.userData.halo.material.opacity = 0.75;
+        if (outside) {
+          $status.textContent = `v/c=${PHYS.vOverC.toFixed(2)} · outside the shell · a flyer can see Bob before Alice`;
+          popAt(B, 'Effect. In some frames this is BEFORE Alice poked. Loop bait.', 'oops', 5000);
+          popAt(A, 'Cause. Order is not safe anymore.', 'alice', 5000);
+        } else {
+          $status.textContent = 'still inside the shell · physics intact';
+          popAt(B, 'Still legal. Bump v/c above 1 to break it.', 'bob', 3000);
+        }
+      }
+    }
+
+    const builders = { light: buildLight, zoom: buildZoom, glue: buildGlue, mode: buildMode, mirage: buildMirage, break: buildBreak };
     const tickers = { light: tickLight, zoom: tickZoom, glue: tickGlue, mode: tickMode, mirage: tickMirage };
 
     function load(name) {
@@ -578,6 +655,27 @@
       clearLayer();
       builders[name]();
     }
+    function syncBreak() {
+      PHYS.on = document.getElementById('breakOn').checked;
+      document.getElementById('breakBody').classList.toggle('hidden', !PHYS.on);
+      PHYS.vOverC = +document.getElementById('vc').value;
+      document.getElementById('vcVal').textContent = PHYS.vOverC.toFixed(2);
+      PHYS.hissIsWord = document.getElementById('hissBit').checked;
+      PHYS.noLocality = document.getElementById('noLoc').checked;
+      PHYS.bothWays = document.getElementById('bothWay').checked;
+      if (PHYS.on && PHYS.vOverC > 1.01) {
+        world.background.setHex(0x140808);
+      } else {
+        world.background.setHex(0x07080c);
+      }
+    }
+    document.getElementById('breakOn').onchange = syncBreak;
+    document.getElementById('vc').oninput = syncBreak;
+    document.getElementById('hissBit').onchange = syncBreak;
+    document.getElementById('noLoc').onchange = syncBreak;
+    document.getElementById('bothWay').onchange = syncBreak;
+    syncBreak();
+
     document.getElementById('sceneSel').onchange = e => load(e.target.value);
     load('light');
 
@@ -601,6 +699,7 @@
       else if (current === 'zoom') tickZoom();
       else if (current === 'mirage') tickMirage(t);
       else if (current === 'glue') tickGlue(t);
+      else if (current === 'break') tickBreak(t);
       // keep bubbles stuck to world points
       for (const el of $pops.children) { if (el._place) el._place(); }
       renderer.render(world, camera);
