@@ -595,25 +595,64 @@
       }
     }
 
+    function fabricGrid(kind, k) {
+      const g = new THREE.Group();
+      const mat = new THREE.LineBasicMaterial({ color: 0x3a4258, transparent: true, opacity: 0.55 });
+      const xs = [];
+      for (let i = -10; i <= 10; i++) {
+        let t = i / 10;
+        if (kind === 'warp') t = Math.sign(t) * Math.pow(Math.abs(t), 1 / k);
+        xs.push(t * 8);
+      }
+      for (const x of xs) {
+        const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x,-4,-4), new THREE.Vector3(x,4,-4)]);
+        g.add(new THREE.Line(geo, mat));
+      }
+      for (let z = -4; z <= 4; z += 1) {
+        const pts = xs.map(x => new THREE.Vector3(x, -4, z));
+        g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+        const pts2 = xs.map(x => new THREE.Vector3(x, 0.02, z));
+        g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2), new THREE.LineBasicMaterial({ color: 0x2e3548, transparent: true, opacity: 0.35 })));
+      }
+      return g;
+    }
+    function mouth(pos) {
+      const m = new THREE.Mesh(
+        new THREE.TorusGeometry(0.55, 0.08, 10, 28),
+        new THREE.MeshBasicMaterial({ color: 0xc9a0ff })
+      );
+      m.rotation.y = Math.PI/2;
+      m.position.copy(pos);
+      return m;
+    }
     function buildBreak() {
-      $title.textContent = 'Break physics';
-      $blurb.textContent = 'Yellow shell = how far LIGHT has gotten. Magenta dot = your signal. If the dot reaches Bob while the shell is still short of him, you left the light cone. Freeze-frame at the finish so you can see it.';
-      $math.textContent = 'shell radius = c · t\nsignal distance = v · t\nv > c  ⇒  signal is outside the shell\nΔt′ = γ(Δt − u Δx / c²) can flip sign';
-      plain('In English: paint a growing bubble of “light has been here.” Send a package at speed v. If v is light, they tie. If v is faster, the package is standing in the dark — light has not had time to be there yet. That dark is the forbidden zone. A passer-by flying the other way can see the package arrive before you sent it.');
+      $title.textContent = 'Break physics / reshape space';
+      $blurb.textContent = 'Yellow shell = light on the FLAT map. Magenta = your signal. You can outrun the shell by going faster than light (illegal) OR by changing the map (the real game). Freeze at the finish.';
+      $math.textContent = 'flat: Δt = L/v          shell r = c t\nwarp: L_proper = L/k     same car, shorter meter stick\nfold: Δt = ℓ/v           hidden adjacency, ℓ ≪ L\nwrap: Δt = min(L, C−L)/v torus; the other way around';
+      plain('In English: two cheats. (1) Make the car faster than light — funny, illegal, a moving stranger can see the future first. (2) Fold, squeeze, or wrap the road so a normal-speed car arrives while the old map’s light bubble is still short. That’s not a faster car. That’s a lying map.');
       html(`
-        <label><span>v / c</span><span id="brkVc">2.00</span></label>
-        <input id="brkV" type="range" min="0.3" max="3" step="0.05" value="2" />
-        <div class="rng"><span>slower than light</span><span>c</span><span>faster</span></div>
+        <label>shape of space</label>
+        <select id="geom" style="margin-bottom:8px">
+          <option value="flat">flat Minkowski (default)</option>
+          <option value="warp">squeezed (warp the meter)</option>
+          <option value="fold">folded (hidden door)</option>
+          <option value="wrap">wrapped (torus / the other way)</option>
+        </select>
+        <label><span>how hard</span><span id="kVal">2.0</span></label>
+        <input id="kAmt" type="range" min="1" max="5" step="0.1" value="2" />
+        <div class="rng"><span>mild</span><span>aggressive</span></div>
+        <label><span>v / c</span><span id="brkVc">1.00</span></label>
+        <input id="brkV" type="range" min="0.3" max="3" step="0.05" value="1" />
+        <div class="rng"><span>slow</span><span>light</span><span>illegal fast</span></div>
         <div class="row"><button class="primary" id="go">send and freeze</button></div>
       `);
       PHYS.on = true;
-      PHYS.vOverC = 2;
+      PHYS.vOverC = 1;
       const bo = document.getElementById('breakOn');
       const vc = document.getElementById('vc');
       if (bo) { bo.checked = true; document.getElementById('breakBody').classList.remove('hidden'); }
-      if (vc) { vc.value = 2; document.getElementById('vcVal').textContent = '2.00'; }
-      world.background.setHex(0x140808);
-      dist = 26;
+      if (vc) { vc.value = 1; document.getElementById('vcVal').textContent = '1.00'; }
+      dist = 28;
 
       const a = makeLab(0xff6b4a); a.position.copy(A);
       const b = makeLab(0x4aa7ff); b.position.copy(B);
@@ -636,68 +675,121 @@
         new THREE.MeshBasicMaterial({ color: 0xffe566 })
       );
       mark.visible = false;
-      layer.add(a, b, cone, disk, ph, mark);
-      // path line
+      const mA = mouth(new THREE.Vector3(A.x + 1.1, 0, 0));
+      const mB = mouth(new THREE.Vector3(B.x - 1.1, 0, 0));
+      mA.visible = mB.visible = false;
+      const grid = fabricGrid('flat', 1);
+      layer.add(grid, a, b, cone, disk, ph, mark, mA, mB);
       const path = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([A, B]),
-        new THREE.LineBasicMaterial({ color: 0xff66aa, transparent: true, opacity: 0.35 })
+        new THREE.LineDashedMaterial({ color: 0xff66aa, dashSize: 0.2, gapSize: 0.12, transparent: true, opacity: 0.4 })
       );
+      path.computeLineDistances();
       layer.add(path);
-      state = { a, b, cone, disk, ph, mark, flying: false, frozen: false, t0: 0 };
+      state = { a, b, cone, disk, ph, mark, mA, mB, grid, path, flying: false, frozen: false, t0: 0, geom: 'flat', k: 2 };
+
+      const applyGeom = () => {
+        const geom = document.getElementById('geom').value;
+        const k = +document.getElementById('kAmt').value;
+        document.getElementById('kVal').textContent = k.toFixed(1);
+        state.geom = geom; state.k = k;
+        layer.remove(state.grid);
+        state.grid = fabricGrid(geom === 'warp' ? 'warp' : 'flat', k);
+        layer.add(state.grid);
+        state.mA.visible = state.mB.visible = (geom === 'fold');
+        world.background.setHex(geom === 'flat' && PHYS.vOverC <= 1.01 ? 0x07080c : 0x101018);
+        const names = { flat: 'flat map', warp: 'squeezed meters', fold: 'hidden door', wrap: 'torus wrap' };
+        $status.textContent = names[geom] + ' · v/c=' + PHYS.vOverC.toFixed(2);
+      };
       const setV = () => {
         const v = +document.getElementById('brkV').value;
         document.getElementById('brkVc').textContent = v.toFixed(2);
         PHYS.vOverC = v; PHYS.on = true;
         if (vc) { vc.value = v; document.getElementById('vcVal').textContent = v.toFixed(2); }
-        world.background.setHex(v > 1.01 ? 0x140808 : 0x07080c);
-        $status.textContent = v > 1.01
-          ? `v/c=${v.toFixed(2)} · ILLEGAL · shell will lag the signal`
-          : (v < 0.99 ? `v/c=${v.toFixed(2)} · slower than light · shell will pass Bob first` : `v/c=1 · they tie`);
+        applyGeom();
       };
-      document.getElementById('brkV').oninput = setV; setV();
+      document.getElementById('geom').onchange = applyGeom;
+      document.getElementById('kAmt').oninput = applyGeom;
+      document.getElementById('brkV').oninput = setV;
+      applyGeom();
       document.getElementById('go').onclick = () => {
         state.flying = true; state.frozen = false; state.t0 = performance.now()/1000;
         ph.visible = true; mark.visible = false; ph.position.copy(A);
         a.userData.halo.material.opacity = 0.7;
         b.userData.halo.material.opacity = 0.16;
-        popAt(A, 'Sent. Watch magenta vs the yellow shell.', 'alice', 2500);
+        popAt(A, 'Sent on this geometry.', 'alice', 2200);
       };
-      popAt(A, 'Yellow bubble = light.', 'warn', 3200);
-      popAt(B, 'If magenta gets here while yellow is still short — you broke it.', 'bob', 3800);
+      popAt(A, 'Try Fold at v/c=1. That’s the honest weird.', 'alice', 4200);
+    }
+    function signalPos(u, geom, k) {
+      if (geom === 'fold') {
+        const a2 = new THREE.Vector3(A.x + 1.1, 0, 0);
+        const b2 = new THREE.Vector3(B.x - 1.1, 0, 0);
+        if (u < 0.45) return A.clone().lerp(a2, u / 0.45);
+        if (u < 0.55) return a2.clone().lerp(b2, (u - 0.45) / 0.1);
+        return b2.clone().lerp(B, (u - 0.55) / 0.45);
+      }
+      if (geom === 'wrap') {
+        const W = 7.5;
+        const short = 2 * W - Lmap; // around the back
+        const dist = short * u;
+        let x = A.x - dist;
+        const min = -W, span = 2 * W;
+        while (x < min) x += span;
+        return new THREE.Vector3(x, 0, 0);
+      }
+      return A.clone().lerp(B, u);
+    }
+    function tripTime(geom, k, v) {
+      if (geom === 'warp') return (Lmap / k) / v;
+      if (geom === 'fold') return (2.2 + (Lmap * 0.08) / k) / v;
+      if (geom === 'wrap') return (2 * 7.5 - Lmap) / v;
+      return Lmap / v;
     }
     function tickBreak(t) {
       if (!state.flying && !state.frozen) return;
       if (state.frozen) return;
       const v = vNow();
-      const u = Math.min(1, (t - state.t0) / (Lmap / v));
-      state.ph.position.lerpVectors(A, B, u);
+      const geom = state.geom, k = state.k;
+      const Ttrip = tripTime(geom, k, v);
+      const u = Math.min(1, (t - state.t0) / Ttrip);
+      state.ph.position.copy(signalPos(u, geom, k));
       const r = Math.max(0.05, (t - state.t0) * cNow());
       state.cone.scale.setScalar(r);
       state.disk.scale.setScalar(r);
-      // light-front marker along the Alice→Bob line
-      const front = Math.min(r, Lmap * 1.5);
       state.mark.visible = true;
-      state.mark.position.set(A.x + front, 0, 0);
+      state.mark.position.set(A.x + Math.min(r, 16), 0, 0);
       if (u >= 1) {
         state.flying = false;
         state.frozen = true;
-        state.ph.position.copy(B);
-        const rFinal = (Lmap / v) * cNow(); // where light is when signal arrives
+        state.ph.position.copy(geom === 'wrap' ? B : signalPos(1, geom, k));
+        if (geom === 'wrap') state.ph.position.copy(B);
+        const rFinal = Ttrip * cNow();
         state.cone.scale.setScalar(Math.max(0.05, rFinal));
         state.disk.scale.setScalar(Math.max(0.05, rFinal));
-        state.mark.position.set(A.x + Math.min(rFinal, Lmap*1.5), 0, 0);
+        state.mark.position.set(A.x + Math.min(rFinal, 16), 0, 0);
         state.b.userData.halo.material.opacity = 0.8;
-        const ratio = PHYS.vOverC;
-        if (ratio > 1.01) {
-          $status.textContent = `FROZEN · v/c=${ratio.toFixed(2)} · light only reached ${rFinal.toFixed(1)} of ${Lmap.toFixed(1)} · signal is OUTSIDE`;
-          popAt(B, 'Signal is here. Light has not. Forbidden zone.', 'oops', 6000);
-          popAt(state.mark.position.clone(), 'Light has only gotten this far.', 'warn', 6000);
-        } else if (ratio < 0.99) {
-          $status.textContent = `FROZEN · v/c=${ratio.toFixed(2)} · light already passed Bob · signal is late`;
+        const beatMap = rFinal + 0.35 < Lmap;
+        const illegal = PHYS.vOverC > 1.01;
+        if (illegal && geom === 'flat') {
+          $status.textContent = 'FROZEN · faster than light on a flat map · funny, illegal, loop bait';
+          popAt(B, 'Illegal fast. Boring-legal is safer. This tears order.', 'oops', 5500);
+        } else if (geom === 'fold' && beatMap) {
+          $status.textContent = 'FROZEN · folded door · legal-speed car, lying map · this is the research';
+          popAt(B, 'Same speed of light. Shorter road. This is the one that isn’t a joke.', 'bob', 6000);
+          popAt(state.mark.position.clone(), 'Flat-map light is still back here.', 'warn', 6000);
+        } else if (geom === 'warp' && beatMap) {
+          $status.textContent = 'FROZEN · squeezed meters · light also takes the short stick · map is the liar';
+          popAt(B, 'You didn’t beat light. You shrank the ruler. They still tied locally.', 'bob', 6000);
+        } else if (geom === 'wrap' && beatMap) {
+          $status.textContent = 'FROZEN · went the other way around the torus';
+          popAt(B, 'Still light-speed. The universe was a doughnut. The long hallway was a sucker bet.', 'bob', 6000);
+        } else if (PHYS.vOverC < 0.99) {
+          $status.textContent = 'FROZEN · slower than light · boring, legal, late';
           popAt(B, 'Light got here first. Boring, legal, slow.', 'bob', 4000);
         } else {
-          $status.textContent = 'FROZEN · v/c=1 · photo finish with light';
-          popAt(B, 'Tied with light. That’s a photon.', 'bob', 4000);
+          $status.textContent = 'FROZEN · photo finish with the flat-map shell';
+          popAt(B, 'Tied with light on this geometry.', 'bob', 4000);
         }
       }
     }
