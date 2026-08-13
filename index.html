@@ -15,7 +15,27 @@
     #hud h1 { font-size: 14px; margin: 0 0 6px; font-weight: 600; }
     #hud p { margin: 0 0 8px; color: #b7b3a8; }
     #math { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #d4c48a; margin: 0 0 8px; white-space: pre-wrap; }
+    #plain {
+      background: rgba(90, 140, 90, .12); border: 1px solid #3d5a3d; border-radius: 8px;
+      padding: 8px 10px; color: #cfe6cf; margin: 0 0 8px; font-size: 13px;
+    }
+    #plain strong { color: #e8f5e8; }
     #status { color: #9fd6ff; font-variant-numeric: tabular-nums; min-height: 1.3em; }
+    #pops { position: absolute; inset: 0; pointer-events: none; z-index: 6; overflow: hidden; }
+    .pop {
+      position: absolute; max-width: 230px; transform: translate(-50%, -110%);
+      background: #f4efe4; color: #1a1c22; border-radius: 12px; padding: 8px 10px;
+      font-size: 12px; line-height: 1.35; box-shadow: 0 8px 24px rgba(0,0,0,.4);
+      animation: popin .18s ease-out;
+    }
+    .pop:after {
+      content: ''; position: absolute; left: 50%; bottom: -7px; transform: translateX(-50%);
+      border: 7px solid transparent; border-top-color: #f4efe4;
+    }
+    .pop.alice { background: #ffd5c8; }
+    .pop.bob { background: #cfe4ff; }
+    .pop.warn { background: #ffe08a; }
+    @keyframes popin { from { opacity: 0; transform: translate(-50%, -90%); } to { opacity: 1; transform: translate(-50%, -110%); } }
     #panel {
       position: absolute; right: 14px; top: 14px; width: 270px;
       background: rgba(8,10,16,.84); border: 1px solid #2a3144; border-radius: 12px;
@@ -54,13 +74,15 @@
     <h1 id="title">Scenario</h1>
     <p id="blurb"></p>
     <div id="math"></div>
+    <div id="plain"></div>
     <div id="status"></div>
   </div>
+  <div id="pops"></div>
   <div id="panel">
     <select id="sceneSel">
       <option value="light">1. Light-tick (baseline, K=1)</option>
       <option value="zoom">2. Far-field point (stars)</option>
-      <option value="glue">3. Evanescent glue / Hartman</option>
+      <option value="glue">3. Through the wall vs around it</option>
       <option value="mode">4. Shared-mode coupler (no ∇)</option>
       <option value="mirage">5. Coarse-clock mirage</option>
     </select>
@@ -150,8 +172,27 @@
     const $title = document.getElementById('title');
     const $blurb = document.getElementById('blurb');
     const $math = document.getElementById('math');
+    const $plain = document.getElementById('plain');
     const $status = document.getElementById('status');
     const $ctrls = document.getElementById('ctrls');
+    const $pops = document.getElementById('pops');
+
+    function plain(t) { $plain.textContent = t; }
+    function popAt(worldVec, text, kind='', ms=3200) {
+      const el = document.createElement('div');
+      el.className = 'pop ' + kind;
+      el.textContent = text;
+      $pops.appendChild(el);
+      const place = () => {
+        const v = worldVec.clone().project(camera);
+        el.style.left = ((v.x * 0.5 + 0.5) * innerWidth) + 'px';
+        el.style.top = ((-v.y * 0.5 + 0.5) * innerHeight) + 'px';
+      };
+      place();
+      el._place = place;
+      setTimeout(() => { el.remove(); }, ms);
+    }
+    function clearPops() { $pops.innerHTML = ''; }
 
     function clearLayer() {
       world.remove(layer);
@@ -165,6 +206,7 @@
       layer = new THREE.Group();
       world.add(layer);
       state = {};
+      clearPops();
     }
 
     function html(s) { $ctrls.innerHTML = s; }
@@ -191,9 +233,13 @@
         ph.visible = true; cone.visible = true; ph.position.copy(A);
         a.userData.halo.material.opacity = 0.6;
         $status.textContent = 'in flight…';
+        popAt(A, 'Photon left. This is the exhaust, not a faster maker.', 'alice', 2800);
       };
       document.getElementById('rst').onclick = () => { state.flying = false; ph.visible = false; cone.visible = false; b.userData.halo.material.opacity = 0.16; $status.textContent = 'idle'; };
+      plain('In English: Alice rings a bell. The sound (light) has to cross the room. Bob cannot hear it early. That wait is one light-tick. Everything else in this playground is trying to beat this race without cheating the clock.');
       $status.textContent = `L = ${Lmap.toFixed(1)}   τγ = ${(Lmap/cLight).toFixed(2)}s   K = 1`;
+      popAt(A, 'Alice: local jiggle only', 'alice', 4000);
+      popAt(B, 'Bob waits for the ripple', 'bob', 4000);
     }
     function tickLight(t) {
       if (!state.flying) return;
@@ -206,6 +252,7 @@
         state.flying = false; state.ph.visible = false;
         state.b.userData.halo.material.opacity = 0.7;
         $status.textContent = `arrived · Δt = τγ · K = 1 · Coulomb Φ looked instant; E did not`;
+        popAt(B, 'Arrived on time. K=1. This is the honest baseline.', 'bob', 3500);
       }
     }
 
@@ -278,64 +325,118 @@
       $status.textContent = kind + ` · r=${z} · typical θ ~ ${θ.toFixed(3)}°`;
     }
 
-    // ---------- 3. GLUE / HARTMAN ----------
+    // ---------- 3. GLUE / HARTMAN (race: around vs through) ----------
     function buildGlue() {
-      $title.textContent = 'Evanescent glue (Hartman vs bit)';
-      $blurb.textContent = 'Barrier = extra axis w. Leak T ≈ e^{−2κd}. Peak delay can look early (Hartman). Honest bit time ~ 1/T. Thin glue is a shortcut. Thick glue is fireworks and silence.';
-      $math.textContent = 'T ≈ exp(−2κd)\nτ_peak  saturates / goes weird with d   (Hartman)\nt_bit ≈ 1/T   (wait for a click)\nK_honest = τγ / t_bit';
+      $title.textContent = 'Through the wall vs around it';
+      $blurb.textContent = 'A race. Yellow takes the long way (a real photon). Purple tries to leak through the wall (tunneling). Hartman is when the leaked bump looks early — that is a shape trick. A real message is a click. Thick wall: almost no clicks. Thin wall: the leak can beat the long way.';
+      $math.textContent = 'T ≈ exp(−2κd)     leak probability\nτ_peak can look early     (Hartman trap)\nt_bit ≈ 1/T              wait for a real click\nK_honest = τγ / t_bit';
+      plain('In English: whispering through a thick door. Sometimes the first little hiss seems instant (Hartman). That hiss is not a sentence. A sentence needs enough sound to count as a word (a click). Thin door: you hear the word before someone runs around the house. Thick door: you wait forever, and the runner wins.');
       html(`
-        <label><span>barrier d</span><span id="dVal">0.25</span></label>
+        <label><span>wall thickness</span><span id="dVal">0.25</span></label>
         <input id="d" type="range" min="0.05" max="1" step="0.01" value="0.25" />
-        <div class="rng"><span>thin (channel)</span><span>thick (starved)</span></div>
-        <div class="row"><button class="primary" id="ping">Alice ping</button></div>
+        <div class="rng"><span>thin door (word gets through)</span><span>thick door (only a hiss)</span></div>
+        <div class="row"><button class="primary" id="ping">race: send both</button></div>
       `);
       const a = makeLab(0xff6b4a); a.position.copy(A);
       const b = makeLab(0x4aa7ff); b.position.copy(B);
       const wall = new THREE.Mesh(
-        new THREE.BoxGeometry(0.4, 4.5, 4.5),
-        new THREE.MeshBasicMaterial({ color: 0x9b7bff, transparent: true, opacity: 0.22 })
+        new THREE.BoxGeometry(0.5, 5.2, 5.2),
+        new THREE.MeshBasicMaterial({ color: 0x9b7bff, transparent: true, opacity: 0.28 })
       );
       layer.add(a, b, wall);
-      const n = 700;
+      // long way around (arc in +y)
+      const curve = new THREE.QuadraticBezierCurve3(A.clone(), new THREE.Vector3(0, 5.2, 0), B.clone());
+      const longLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(curve.getPoints(40)),
+        new THREE.LineDashedMaterial({ color: 0xfff1a8, dashSize: 0.25, gapSize: 0.12, transparent: true, opacity: 0.7 })
+      );
+      longLine.computeLineDistances();
+      layer.add(longLine);
+      const longPh = makePhoton(); longPh.visible = false; layer.add(longPh);
+      const leakPh = makePhoton();
+      leakPh.children[0].material.color.setHex(0xc9b0ff);
+      leakPh.children[1].material.color.setHex(0xc9b0ff);
+      leakPh.visible = false; layer.add(leakPh);
+      const n = 500;
       const g = new THREE.BufferGeometry();
       const pos = new Float32Array(n*3);
       for (let i=0;i<n;i++){
-        pos[i*3]=(Math.random()-0.5)*0.6;
-        pos[i*3+1]=(Math.random()-0.5)*4;
-        pos[i*3+2]=(Math.random()-0.5)*4;
+        pos[i*3]=(Math.random()-0.5)*0.7;
+        pos[i*3+1]=(Math.random()-0.5)*5;
+        pos[i*3+2]=(Math.random()-0.5)*5;
       }
       g.setAttribute('position', new THREE.BufferAttribute(pos,3));
-      const leak = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xb9a4ff, size: 0.05, transparent: true, opacity: 0.5 }));
-      layer.add(leak);
-      state = { a, b, wall, leak, waiting: false };
+      const hiss = new THREE.Points(g, new THREE.PointsMaterial({
+        color: 0xb9a4ff, size: 0.07, map: STAR_TEX, transparent: true, opacity: 0.45, depthWrite: false
+      }));
+      layer.add(hiss);
+      state = { a, b, wall, curve, longPh, leakPh, hiss, racing: false, t0: 0, leakHit: false, leakDone: false, longDone: false, T: 0 };
       const upd = () => {
         const d = +document.getElementById('d').value;
         document.getElementById('dVal').textContent = d.toFixed(2);
         const κ = 3.2, T = Math.exp(-2*κ*d*4);
-        wall.scale.set(0.3+d*3, 1, 1);
-        leak.material.opacity = Math.min(0.8, T*2);
+        wall.scale.set(0.35+d*3.2, 1, 1);
+        hiss.material.opacity = Math.min(0.75, 0.08 + T*2);
         const tbit = 1/Math.max(T, 1e-9);
         const tγ = Lmap/cLight;
         const K = tγ/tbit;
-        $status.textContent = `T≈${T.toExponential(2)}  t_bit≈${fmtTime(tbit)}  τγ=${fmtTime(tγ)}  K_bit≈${K.toExponential(2)} ${K>1?'(beats long way)':'(starved)'}`;
-        state.T = T; state.tbit = tbit; state.K = K;
+        $status.textContent = `leak T≈${T.toExponential(2)}  wait-for-word ${fmtTime(tbit)}  long-way ${fmtTime(tγ)}  ${K>1 ? 'thin: word can win' : 'thick: runner wins'}`;
+        state.T = T; state.tbit = tbit; state.d = d;
       };
       document.getElementById('d').oninput = upd; upd();
+      popAt(new THREE.Vector3(0, 5.2, 0), 'Yellow = run around the house', 'warn', 4500);
+      popAt(new THREE.Vector3(0, 0, 0), 'Purple = whisper through the door', '', 4500);
       document.getElementById('ping').onclick = () => {
+        const T = state.T;
+        state.racing = true; state.t0 = performance.now()/1000;
+        state.longDone = state.leakDone = false;
+        state.leakHit = Math.random() < Math.min(1, T * 4 + (T > 0.05 ? 0.35 : 0));
+        state.longPh.visible = true;
+        state.leakPh.visible = true;
         state.a.userData.halo.material.opacity = 0.7;
-        const hit = Math.random() < Math.min(1, state.T * 3);
-        if (hit) {
-          state.b.userData.halo.material.color.setHex(0x4aa7ff);
-          state.b.userData.halo.material.opacity = 0.75;
-          $status.textContent = $status.textContent.split(' · ')[0] + ' · click at Bob';
-        } else {
-          state.b.userData.halo.material.color.setHex(0x884444);
-          state.b.userData.halo.material.opacity = 0.45;
-          $status.textContent = $status.textContent.split(' · ')[0] + ' · miss (silence is the physics, not a dead button)';
-        }
+        state.b.userData.halo.material.color.setHex(0x4aa7ff);
+        state.b.userData.halo.material.opacity = 0.16;
+        popAt(A, 'Go. Yellow runs around. Purple tries the door.', 'alice', 2800);
+        $status.textContent = state.leakHit
+          ? 'race on · a real click may leak through'
+          : 'race on · this time the door only hissed (no word). Watch yellow still finish.';
       };
     }
-    function tickGlue() {}
+    function tickGlue(t) {
+      if (!state.racing) return;
+      const tγ = Lmap / cLight;
+      const uLong = Math.min(1, (t - state.t0) / tγ);
+      state.longPh.position.copy(state.curve.getPoint(uLong));
+      // Hartman: leaked *shape* crosses quickly (short delay), even when no click
+      const tPeak = 0.12 + state.d * 0.08; // looks early, barely grows with d
+      const uPeak = Math.min(1, (t - state.t0) / tPeak);
+      state.leakPh.position.lerpVectors(A, B, uPeak);
+      state.leakPh.visible = uPeak < 1 || !state.leakDone;
+      state.leakPh.children[1].material.opacity = 0.12 + 0.25 * state.T; // faint if starved
+      if (!state.leakDone && uPeak >= 1) {
+        state.leakDone = true;
+        popAt(B, state.leakHit
+          ? 'CLICK. That is a word through the door. Honest shortcut if it beat yellow.'
+          : 'Hiss only (Hartman). The bump arrived looking early, but it was not a message.',
+          state.leakHit ? 'bob' : 'warn', 4200);
+        if (state.leakHit) {
+          state.b.userData.halo.material.color.setHex(0x4aa7ff);
+          state.b.userData.halo.material.opacity = 0.8;
+        } else {
+          state.b.userData.halo.material.color.setHex(0x886633);
+          state.b.userData.halo.material.opacity = 0.35;
+        }
+      }
+      if (!state.longDone && uLong >= 1) {
+        state.longDone = true;
+        state.racing = false;
+        state.longPh.visible = false;
+        popAt(new THREE.Vector3(0, 5.2, 0), state.leakHit
+          ? 'Yellow finished too. Compare: who lit Bob first?'
+          : 'Runner wins. Thick door: you wait for a word that almost never comes.',
+          'warn', 4000);
+      }
+    }
 
     // ---------- 4. SHARED MODE ----------
     function buildMode() {
@@ -372,6 +473,8 @@
         $status.textContent = oneway
           ? `kick · Bob will follow χ in ~${state.tau.toFixed(3)}s · K≈${state.K.toFixed(1)}`
           : `kick both ways · Tolman-dangerous if a boost aims the return`;
+        popAt(A, 'Pluck the shared string.', 'alice', 2200);
+        popAt(B, oneway ? 'Bob feels the same string.' : 'Both ways: time-loop risk if someone is moving.', 'bob', 2800);
       };
     }
     function tickMode(dt) {
@@ -455,6 +558,7 @@
         state.ghosted = true;
         state.ghost.userData.halo.material.opacity = 0.55;
         state.ghost.children[0].material.opacity = 0.35;
+        popAt(B, 'Ghost: the blunt clock already painted Bob. The real photon is still in the air.', 'warn', 3200);
       }
       if (u >= 1) {
         state.flying = false; state.ph.visible = false;
@@ -496,6 +600,9 @@
       else if (current === 'light') tickLight(t);
       else if (current === 'zoom') tickZoom();
       else if (current === 'mirage') tickMirage(t);
+      else if (current === 'glue') tickGlue(t);
+      // keep bubbles stuck to world points
+      for (const el of $pops.children) { if (el._place) el._place(); }
       renderer.render(world, camera);
       requestAnimationFrame(frame);
     }
