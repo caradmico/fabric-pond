@@ -149,7 +149,7 @@
     const cLight = 8; // units/s ; light-tick τ = Lmap/cLight
     const PHYS = { on: false, vOverC: 1, hissIsWord: false, noLocality: false, bothWays: false };
     function cNow() { return cLight; }
-    function vNow() { return cLight * (PHYS.on ? PHYS.vOverC : 1); }
+    function vNow() { if (current === 'break') return cLight * PHYS.vOverC; return cLight * (PHYS.on ? PHYS.vOverC : 1); }
 
     function discTex() {
       const c = document.createElement('canvas'); c.width = c.height = 64;
@@ -597,50 +597,107 @@
 
     function buildBreak() {
       $title.textContent = 'Break physics';
-      $blurb.textContent = 'Legal light is the growing shell. Your signal is the moving dot. If you push v above c, the dot punches out of the shell. A second, moving observer can then see Bob happen before Alice — a closed causal loop toy.';
-      $math.textContent = 'v > c  ⇒  worldline is spacelike
-boosted frame: Δt′ = γ (Δt − v Δx / c²) can flip sign
-that is the Tolman bite';
-      plain('In English: the yellow shell is “what light has had time to reach.” If your message is outside that shell, you didn’t outrun a car — you left the map. Flip v/c above 1 in the red panel and send. Then imagine someone flying past: they can see the effect before the cause.');
-      html(`<div class="row"><button class="primary" id="go">send signal</button></div>
-        <p style="color:#e8a090;margin:8px 0 0">Use the red “Break physics” knobs. v/c > 1 is the whole point of this scene.</p>`);
+      $blurb.textContent = 'Yellow shell = how far LIGHT has gotten. Magenta dot = your signal. If the dot reaches Bob while the shell is still short of him, you left the light cone. Freeze-frame at the finish so you can see it.';
+      $math.textContent = 'shell radius = c · t\nsignal distance = v · t\nv > c  ⇒  signal is outside the shell\nΔt′ = γ(Δt − u Δx / c²) can flip sign';
+      plain('In English: paint a growing bubble of “light has been here.” Send a package at speed v. If v is light, they tie. If v is faster, the package is standing in the dark — light has not had time to be there yet. That dark is the forbidden zone. A passer-by flying the other way can see the package arrive before you sent it.');
+      html(`
+        <label><span>v / c</span><span id="brkVc">2.00</span></label>
+        <input id="brkV" type="range" min="0.3" max="3" step="0.05" value="2" />
+        <div class="rng"><span>slower than light</span><span>c</span><span>faster</span></div>
+        <div class="row"><button class="primary" id="go">send and freeze</button></div>
+      `);
+      PHYS.on = true;
+      PHYS.vOverC = 2;
+      const bo = document.getElementById('breakOn');
+      const vc = document.getElementById('vc');
+      if (bo) { bo.checked = true; document.getElementById('breakBody').classList.remove('hidden'); }
+      if (vc) { vc.value = 2; document.getElementById('vcVal').textContent = '2.00'; }
+      world.background.setHex(0x140808);
+      dist = 26;
+
       const a = makeLab(0xff6b4a); a.position.copy(A);
       const b = makeLab(0x4aa7ff); b.position.copy(B);
       const cone = new THREE.Mesh(
-        new THREE.SphereGeometry(1, 28, 14),
-        new THREE.MeshBasicMaterial({ color: 0xfff1a8, transparent: true, opacity: 0.1, wireframe: true })
+        new THREE.SphereGeometry(1, 36, 22),
+        new THREE.MeshBasicMaterial({ color: 0xffe566, transparent: true, opacity: 0.22, wireframe: true })
       );
-      cone.position.copy(A); cone.visible = false;
-      const ph = makePhoton(); ph.visible = false;
-      layer.add(a, b, cone, ph);
-      state = { a, b, cone, ph, flying: false, t0: 0 };
-      document.getElementById('go').onclick = () => {
-        if (!PHYS.on) {
-          popAt(A, 'Unlock “break physics” first — or this is just scene 1 again.', 'warn', 3000);
-        }
-        state.flying = true; state.t0 = performance.now()/1000;
-        ph.visible = true; cone.visible = true; ph.position.copy(A);
-        a.userData.halo.material.opacity = 0.6;
-        b.userData.halo.material.opacity = 0.16;
+      cone.position.copy(A);
+      const disk = new THREE.Mesh(
+        new THREE.CircleGeometry(1, 48),
+        new THREE.MeshBasicMaterial({ color: 0xffe566, transparent: true, opacity: 0.08, side: THREE.DoubleSide })
+      );
+      disk.rotation.x = Math.PI/2; disk.position.copy(A);
+      const ph = makePhoton();
+      ph.children[0].material.color.setHex(0xff66aa);
+      ph.children[1].material.color.setHex(0xff66aa);
+      ph.visible = false;
+      const mark = new THREE.Mesh(
+        new THREE.TorusGeometry(0.35, 0.04, 8, 24),
+        new THREE.MeshBasicMaterial({ color: 0xffe566 })
+      );
+      mark.visible = false;
+      layer.add(a, b, cone, disk, ph, mark);
+      // path line
+      const path = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([A, B]),
+        new THREE.LineBasicMaterial({ color: 0xff66aa, transparent: true, opacity: 0.35 })
+      );
+      layer.add(path);
+      state = { a, b, cone, disk, ph, mark, flying: false, frozen: false, t0: 0 };
+      const setV = () => {
+        const v = +document.getElementById('brkV').value;
+        document.getElementById('brkVc').textContent = v.toFixed(2);
+        PHYS.vOverC = v; PHYS.on = true;
+        if (vc) { vc.value = v; document.getElementById('vcVal').textContent = v.toFixed(2); }
+        world.background.setHex(v > 1.01 ? 0x140808 : 0x07080c);
+        $status.textContent = v > 1.01
+          ? `v/c=${v.toFixed(2)} · ILLEGAL · shell will lag the signal`
+          : (v < 0.99 ? `v/c=${v.toFixed(2)} · slower than light · shell will pass Bob first` : `v/c=1 · they tie`);
       };
-      popAt(A, 'Shell = light. Dot = your signal.', 'alice', 3500);
+      document.getElementById('brkV').oninput = setV; setV();
+      document.getElementById('go').onclick = () => {
+        state.flying = true; state.frozen = false; state.t0 = performance.now()/1000;
+        ph.visible = true; mark.visible = false; ph.position.copy(A);
+        a.userData.halo.material.opacity = 0.7;
+        b.userData.halo.material.opacity = 0.16;
+        popAt(A, 'Sent. Watch magenta vs the yellow shell.', 'alice', 2500);
+      };
+      popAt(A, 'Yellow bubble = light.', 'warn', 3200);
+      popAt(B, 'If magenta gets here while yellow is still short — you broke it.', 'bob', 3800);
     }
     function tickBreak(t) {
-      if (!state.flying) return;
-      const u = Math.min(1, (t - state.t0) / (Lmap / vNow()));
+      if (!state.flying && !state.frozen) return;
+      if (state.frozen) return;
+      const v = vNow();
+      const u = Math.min(1, (t - state.t0) / (Lmap / v));
       state.ph.position.lerpVectors(A, B, u);
-      state.cone.scale.setScalar(Math.max(0.05, (t - state.t0) * cNow()));
-      const outside = PHYS.on && PHYS.vOverC > 1.01;
+      const r = Math.max(0.05, (t - state.t0) * cNow());
+      state.cone.scale.setScalar(r);
+      state.disk.scale.setScalar(r);
+      // light-front marker along the Alice→Bob line
+      const front = Math.min(r, Lmap * 1.5);
+      state.mark.visible = true;
+      state.mark.position.set(A.x + front, 0, 0);
       if (u >= 1) {
-        state.flying = false; state.ph.visible = false;
-        state.b.userData.halo.material.opacity = 0.75;
-        if (outside) {
-          $status.textContent = `v/c=${PHYS.vOverC.toFixed(2)} · outside the shell · a flyer can see Bob before Alice`;
-          popAt(B, 'Effect. In some frames this is BEFORE Alice poked. Loop bait.', 'oops', 5000);
-          popAt(A, 'Cause. Order is not safe anymore.', 'alice', 5000);
+        state.flying = false;
+        state.frozen = true;
+        state.ph.position.copy(B);
+        const rFinal = (Lmap / v) * cNow(); // where light is when signal arrives
+        state.cone.scale.setScalar(Math.max(0.05, rFinal));
+        state.disk.scale.setScalar(Math.max(0.05, rFinal));
+        state.mark.position.set(A.x + Math.min(rFinal, Lmap*1.5), 0, 0);
+        state.b.userData.halo.material.opacity = 0.8;
+        const ratio = PHYS.vOverC;
+        if (ratio > 1.01) {
+          $status.textContent = `FROZEN · v/c=${ratio.toFixed(2)} · light only reached ${rFinal.toFixed(1)} of ${Lmap.toFixed(1)} · signal is OUTSIDE`;
+          popAt(B, 'Signal is here. Light has not. Forbidden zone.', 'oops', 6000);
+          popAt(state.mark.position.clone(), 'Light has only gotten this far.', 'warn', 6000);
+        } else if (ratio < 0.99) {
+          $status.textContent = `FROZEN · v/c=${ratio.toFixed(2)} · light already passed Bob · signal is late`;
+          popAt(B, 'Light got here first. Boring, legal, slow.', 'bob', 4000);
         } else {
-          $status.textContent = 'still inside the shell · physics intact';
-          popAt(B, 'Still legal. Bump v/c above 1 to break it.', 'bob', 3000);
+          $status.textContent = 'FROZEN · v/c=1 · photo finish with light';
+          popAt(B, 'Tied with light. That’s a photon.', 'bob', 4000);
         }
       }
     }
