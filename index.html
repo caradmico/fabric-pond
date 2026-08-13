@@ -91,7 +91,8 @@
       <option value="glue">3. Through the wall vs around it</option>
       <option value="mode">4. Shared-mode coupler (no ∇)</option>
       <option value="mirage">5. Coarse-clock mirage</option>
-      <option value="break">6. Break physics (v > c)</option>
+      <option value="break">6. Reshape space / break physics</option>
+      <option value="live">7. The live object (one-way coupler)</option>
     </select>
     <div id="ctrls"></div>
     <div class="break">
@@ -109,17 +110,29 @@
   </div>
   <div id="hint">drag to orbit · scroll to zoom · math is the engine, the picture is the lie detector</div>
   <script type="importmap">
-    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    { "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    } }
   </script>
   <script type="module">
     import * as THREE from 'three';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
     const canvas = document.getElementById('c');
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
     const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 5000);
     const world = new THREE.Scene();
     world.background = new THREE.Color(0x07080c);
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(world, camera));
+    const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.55, 0.7, 0.25);
+    composer.addPass(bloom);
 
     let yaw = 0.45, pitch = 0.32, dist = 20;
     let dragging = false, lx = 0, ly = 0;
@@ -140,6 +153,7 @@
       renderer.setSize(innerWidth, innerHeight, false);
       camera.aspect = innerWidth / innerHeight;
       camera.updateProjectionMatrix();
+      composer.setSize(innerWidth, innerHeight);
     }
     addEventListener('resize', resize); resize();
 
@@ -678,15 +692,20 @@
       const mA = mouth(new THREE.Vector3(A.x + 1.1, 0, 0));
       const mB = mouth(new THREE.Vector3(B.x - 1.1, 0, 0));
       mA.visible = mB.visible = false;
+      const tunnel = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.42, 0.42, 9.0, 24, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0xea9dff, transparent: true, opacity: 0.22, side: THREE.DoubleSide, wireframe: true })
+      );
+      tunnel.rotation.z = Math.PI/2; tunnel.visible = false;
       const grid = fabricGrid('flat', 1);
-      layer.add(grid, a, b, cone, disk, ph, mark, mA, mB);
+      layer.add(grid, a, b, cone, disk, ph, mark, mA, mB, tunnel);
       const path = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([A, B]),
         new THREE.LineDashedMaterial({ color: 0xff66aa, dashSize: 0.2, gapSize: 0.12, transparent: true, opacity: 0.4 })
       );
       path.computeLineDistances();
       layer.add(path);
-      state = { a, b, cone, disk, ph, mark, mA, mB, grid, path, flying: false, frozen: false, t0: 0, geom: 'flat', k: 2 };
+      state = { a, b, cone, disk, ph, mark, mA, mB, tunnel, grid, path, flying: false, frozen: false, t0: 0, geom: 'flat', k: 2 };
 
       const applyGeom = () => {
         const geom = document.getElementById('geom').value;
@@ -759,6 +778,11 @@
       state.disk.scale.setScalar(r);
       state.mark.visible = true;
       state.mark.position.set(A.x + Math.min(r, 16), 0, 0);
+      if (state.tunnel) {
+        const inThroat = geom === 'fold' && u > 0.42 && u < 0.58;
+        state.tunnel.visible = inThroat;
+        if (inThroat) state.tunnel.rotation.x += 0.2;
+      }
       if (u >= 1) {
         state.flying = false;
         state.frozen = true;
@@ -794,7 +818,77 @@
       }
     }
 
-    const builders = { light: buildLight, zoom: buildZoom, glue: buildGlue, mode: buildMode, mirage: buildMirage, break: buildBreak };
+    function buildLive() {
+      $title.textContent = 'The live object';
+      $blurb.textContent = 'This is the one that is not a joke: a write-asymmetric shared mode with no spatial gradient. Alice writes. Bob reads. Light still crawls the hallway. The string is the same object. Papers have to decide if that string is allowed at spacelike separation.';
+      $math.textContent = 'χ̈ + Ω²χ = g_A φ_A     (no ∇χ)
+Bob sees χ, not a wave from Alice
+K = (L/c) / τ_Ω
+one-way: g_B = 0 on the source term';
+      plain('In English: two labs holding one guitar string that does not live in the hallway. Pluck it here, it is already there. Maxwell’s wave on the lower rod is the exhaust — it will lose. If both can pluck, a moving stranger can scramble cause and effect. So only Alice plucks.');
+      html(`
+        <label><span>Ω</span><span id="lv">10</span></label>
+        <input id="lΩ" type="range" min="2" max="28" step="0.5" value="10" />
+        <div class="tog"><input id="lOne" type="checkbox" checked /> <span>Alice-only (safe)</span></div>
+        <div class="row"><button class="primary" id="pluck">pluck</button>
+        <button id="photon2">also send a photon</button></div>
+      `);
+      const a = makeLab(0xff6b4a); a.position.copy(A);
+      const b = makeLab(0x4aa7ff); b.position.copy(B);
+      const string = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.14, 0.14, Lmap, 20, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0x66ffd1, transparent: true, opacity: 0.75 })
+      );
+      string.rotation.z = Math.PI/2;
+      const hall = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.05, Lmap, 10, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0xffe566, transparent: true, opacity: 0.35 })
+      );
+      hall.rotation.z = Math.PI/2; hall.position.y = -1.6;
+      const ph = makePhoton(); ph.visible = false; ph.position.copy(A.clone().setY(-1.6));
+      layer.add(a,b,string,hall,ph);
+      state = { a,b,string,hall,ph, chi:0, v:0, pulse:0, Ω:10, flying:false, t0:0 };
+      const upd = () => {
+        state.Ω = +document.getElementById('lΩ').value;
+        document.getElementById('lv').textContent = state.Ω;
+        const tau = 8/(state.Ω*state.Ω);
+        const K = (Lmap/cLight)/tau;
+        $status.textContent = `τ_Ω≈${tau.toFixed(3)}s  τγ=${(Lmap/cLight).toFixed(2)}s  K≈${K.toFixed(1)}  ${K>1?'string beats hallway':''}`;
+      };
+      document.getElementById('lΩ').oninput = upd; upd();
+      document.getElementById('pluck').onclick = () => {
+        state.v += 7; state.pulse = 1; a.userData.halo.material.opacity = 0.75;
+        const one = document.getElementById('lOne').checked;
+        popAt(A, 'Pluck.', 'alice', 1800);
+        popAt(B, one ? 'Bob only listens. Safe.' : 'Bob can pluck too. Loop bait.', one ? 'bob' : 'oops', 2800);
+      };
+      document.getElementById('photon2').onclick = () => {
+        ph.visible = true; ph.position.set(A.x, -1.6, 0);
+        state.flying = true; state.t0 = performance.now()/1000;
+        popAt(new THREE.Vector3(0,-1.6,0), 'Hallway photon. It will lose if Ω is stiff.', 'warn', 2500);
+      };
+      popAt(A, 'Green string = the live object. Yellow = light in the hall.', 'alice', 4000);
+    }
+    function tickLive(dt, t) {
+      if (state.Ω == null) return;
+      state.v += (-state.Ω*state.Ω * (state.chi||0)) * dt;
+      state.chi = (state.chi||0) + state.v * dt;
+      state.v *= 0.992;
+      state.pulse = Math.max(0, (state.pulse||0) - dt*0.5);
+      const amp = Math.min(1, Math.abs(state.chi)*0.45 + state.pulse);
+      if (state.string) {
+        state.string.material.opacity = 0.45 + amp*0.55;
+        state.string.scale.set(1+amp*2.2, 1, 1+amp*2.2);
+        state.b.userData.halo.material.opacity = 0.16 + amp*0.8;
+      }
+      if (state.flying && state.ph) {
+        const u = Math.min(1, (t - state.t0) / (Lmap / cLight));
+        state.ph.position.set(A.x + u*Lmap, -1.6, 0);
+        if (u>=1) { state.flying=false; popAt(new THREE.Vector3(B.x,-1.6,0), 'Photon arrives. Check whether Bob already glowed.', 'warn', 3500); }
+      }
+    }
+
+    const builders = { light: buildLight, zoom: buildZoom, glue: buildGlue, mode: buildMode, mirage: buildMirage, break: buildBreak, live: buildLive };
     const tickers = { light: tickLight, zoom: tickZoom, glue: tickGlue, mode: tickMode, mirage: tickMirage };
 
     function load(name) {
@@ -849,9 +943,9 @@
       else if (current === 'mirage') tickMirage(t);
       else if (current === 'glue') tickGlue(t);
       else if (current === 'break') tickBreak(t);
-      // keep bubbles stuck to world points
+      else if (current === 'live') tickLive(dt, t);
       for (const el of $pops.children) { if (el._place) el._place(); }
-      renderer.render(world, camera);
+      composer.render();
       requestAnimationFrame(frame);
     }
     frame();
