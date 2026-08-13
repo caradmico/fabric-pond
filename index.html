@@ -38,7 +38,13 @@
     button.primary { background: #2a4a6e; border-color: #5aa0d6; }
     .tog { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: #c9c4b8; }
     .tog input { width: auto; }
-    #hint { position: absolute; bottom: 12px; left: 14px; font-size: 11px; color: #7d7a72; }
+    #hud, #panel, #hint { z-index: 5; }
+    #hint {
+      position: absolute; bottom: 12px; left: 14px; font-size: 11px; color: #c9c4b8;
+      background: rgba(8,10,16,.82); border: 1px solid #2a3144; border-radius: 8px;
+      padding: 6px 10px;
+    }
+    .rng { display: flex; justify-content: space-between; color: #6f6b63; font-size: 10px; margin-top: -2px; }
     .hidden { display: none !important; }
   </style>
 </head>
@@ -101,6 +107,34 @@
     const Lmap = A.distanceTo(B);
     const cLight = 8; // units/s ; light-tick τ = Lmap/cLight
 
+    function discTex() {
+      const c = document.createElement('canvas'); c.width = c.height = 64;
+      const x = c.getContext('2d');
+      const g = x.createRadialGradient(32, 32, 0, 32, 32, 30);
+      g.addColorStop(0, 'rgba(255,255,255,1)');
+      g.addColorStop(0.45, 'rgba(255,255,255,.9)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      x.fillStyle = g; x.beginPath(); x.arc(32,32,30,0,6.28); x.fill();
+      const t = new THREE.CanvasTexture(c);
+      t.needsUpdate = true;
+      return t;
+    }
+    const STAR_TEX = discTex();
+
+    function fmtTime(s) {
+      if (!isFinite(s)) return '∞';
+      const a = Math.abs(s);
+      if (a >= 1e4 || (a > 0 && a < 0.01)) return s.toExponential(2) + 's';
+      return s.toFixed(2) + 's';
+    }
+
+    function makePhoton() {
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 12), new THREE.MeshBasicMaterial({ color: 0xfff1a8 })));
+      g.add(new THREE.Mesh(new THREE.SphereGeometry(0.5, 12, 8), new THREE.MeshBasicMaterial({ color: 0xfff1a8, transparent: true, opacity: 0.28 })));
+      return g;
+    }
+
     function makeLab(color) {
       const g = new THREE.Group();
       g.add(new THREE.Mesh(new THREE.SphereGeometry(0.28, 20, 14), new THREE.MeshBasicMaterial({ color })));
@@ -149,7 +183,7 @@
         new THREE.MeshBasicMaterial({ color: 0xfff1a8, transparent: true, opacity: 0.07, wireframe: true })
       );
       cone.visible = false; layer.add(cone);
-      const ph = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 8), new THREE.MeshBasicMaterial({ color: 0xfff1a8 }));
+      const ph = makePhoton();
       ph.visible = false; layer.add(ph);
       state = { a, b, cone, ph, flying: false, t0: 0 };
       document.getElementById('go').onclick = () => {
@@ -203,27 +237,35 @@
       $math.textContent = 'θ ≈ a / r  →  0 as r → ∞\nisland: ρ=0 for r > R  →  empty sky\nhomogeneous: ρ ≈ const  →  stars at every zoom\n(finite age: horizon c·t still cuts Olbers off)';
       html(`
         <div class="tog"><input type="checkbox" id="homo" /> <span>equal matter everywhere</span></div>
-        <label><span>zoom distance</span><span id="zVal">12</span></label>
-        <input id="zoomR" type="range" min="8" max="400" step="1" value="12" />
+        <label><span>zoom distance</span><span id="zVal">28</span></label>
+        <input id="zoomR" type="range" min="12" max="400" step="1" value="28" />
+        <div class="rng"><span>in the cluster</span><span>past the last star</span></div>
         <p style="color:#8a8680;margin:8px 0 0">unchecked = island of stars, then nothing. checked = you never run out of matter.</p>
       `);
       const rebuild = () => {
         if (state.stars) { layer.remove(state.stars); state.stars.geometry.dispose(); }
         const homo = document.getElementById('homo').checked;
         const stars = new THREE.Points(
-          starGeo(homo ? 14000 : 5000, 14, !homo),
-          new THREE.PointsMaterial({ color: 0xfff6d2, size: homo ? 0.35 : 0.55, sizeAttenuation: true, transparent: true, opacity: 0.9 })
+          starGeo(homo ? 16000 : 3500, 8, !homo),
+          new THREE.PointsMaterial({
+            color: 0xfff6d2, size: homo ? 0.08 : 0.11, sizeAttenuation: true,
+            map: STAR_TEX, transparent: true, opacity: 0.95, depthWrite: false,
+            blending: THREE.AdditiveBlending
+          })
         );
         layer.add(stars); state.stars = stars;
+        state.kind = homo ? 'homogeneous' : 'island';
         $status.textContent = homo
           ? 'homogeneous · every zoom still has stars · no special empty “beyond”'
           : 'island · pull zoom right until stars collapse to a speck, then black';
       };
-      state = { stars: null };
+      state = { stars: null, kind: 'island' };
       rebuild();
       document.getElementById('homo').onchange = rebuild;
       document.getElementById('zoomR').oninput = e => { document.getElementById('zVal').textContent = e.target.value; };
-      dist = 12;
+      dist = 28;
+      document.getElementById('zoomR').value = 28;
+      document.getElementById('zVal').textContent = '28';
     }
     function tickZoom() {
       const z = +document.getElementById('zoomR').value;
@@ -232,7 +274,8 @@
       camera.far = Math.max(2000, z * 20);
       camera.updateProjectionMatrix();
       const θ = (0.5 / z) * (180/Math.PI);
-      $status.textContent = ($status.textContent.split('·')[0] || '') + ` · r=${z} · typical θ ~ ${θ.toFixed(3)}°`;
+      const kind = state.kind || 'island';
+      $status.textContent = kind + ` · r=${z} · typical θ ~ ${θ.toFixed(3)}°`;
     }
 
     // ---------- 3. GLUE / HARTMAN ----------
@@ -243,6 +286,7 @@
       html(`
         <label><span>barrier d</span><span id="dVal">0.25</span></label>
         <input id="d" type="range" min="0.05" max="1" step="0.01" value="0.25" />
+        <div class="rng"><span>thin (channel)</span><span>thick (starved)</span></div>
         <div class="row"><button class="primary" id="ping">Alice ping</button></div>
       `);
       const a = makeLab(0xff6b4a); a.position.copy(A);
@@ -273,7 +317,7 @@
         const tbit = 1/Math.max(T, 1e-9);
         const tγ = Lmap/cLight;
         const K = tγ/tbit;
-        $status.textContent = `T≈${T.toExponential(2)}  t_bit≈${tbit.toFixed(2)}s  τγ=${tγ.toFixed(2)}s  K_bit≈${K.toFixed(2)} ${K>1?'(beats long way)':'(starved)'}`;
+        $status.textContent = `T≈${T.toExponential(2)}  t_bit≈${fmtTime(tbit)}  τγ=${fmtTime(tγ)}  K_bit≈${K.toExponential(2)} ${K>1?'(beats long way)':'(starved)'}`;
         state.T = T; state.tbit = tbit; state.K = K;
       };
       document.getElementById('d').oninput = upd; upd();
@@ -281,10 +325,13 @@
         state.a.userData.halo.material.opacity = 0.7;
         const hit = Math.random() < Math.min(1, state.T * 3);
         if (hit) {
-          state.b.userData.halo.material.opacity = 0.7;
-          $status.textContent += ' · click';
+          state.b.userData.halo.material.color.setHex(0x4aa7ff);
+          state.b.userData.halo.material.opacity = 0.75;
+          $status.textContent = $status.textContent.split(' · ')[0] + ' · click at Bob';
         } else {
-          $status.textContent += ' · no click (need more pings ~ 1/T)';
+          state.b.userData.halo.material.color.setHex(0x884444);
+          state.b.userData.halo.material.opacity = 0.45;
+          $status.textContent = $status.textContent.split(' · ')[0] + ' · miss (silence is the physics, not a dead button)';
         }
       };
     }
@@ -298,17 +345,18 @@
       html(`
         <label><span>Ω stiffness</span><span id="oVal">8</span></label>
         <input id="om" type="range" min="1" max="24" step="0.5" value="8" />
+        <div class="rng"><span>soft (slow)</span><span>stiff (fast K)</span></div>
         <div class="tog"><input type="checkbox" id="oneway" checked /> <span>one-way (Alice→Bob)</span></div>
         <div class="row"><button class="primary" id="kick">Alice kick χ</button></div>
       `);
       const a = makeLab(0xff6b4a); a.position.copy(A);
       const b = makeLab(0x4aa7ff); b.position.copy(B);
       const rod = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.07, 0.07, Lmap, 12, 1, true),
-        new THREE.MeshBasicMaterial({ color: 0x7dffc3, transparent: true, opacity: 0.35 })
+        new THREE.CylinderGeometry(0.12, 0.12, Lmap, 16, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0x5dffc8, transparent: true, opacity: 0.7 })
       );
       rod.rotation.z = Math.PI/2; layer.add(a,b,rod);
-      state = { a, b, rod, chi: 0, v: 0, kicking: false };
+      state = { a, b, rod, chi: 0, v: 0, pulse: 0 };
       const upd = () => {
         const Ω = +document.getElementById('om').value;
         document.getElementById('oVal').textContent = Ω;
@@ -319,7 +367,7 @@
       };
       document.getElementById('om').oninput = upd; upd();
       document.getElementById('kick').onclick = () => {
-        state.v += 4; state.a.userData.halo.material.opacity = 0.7;
+        state.v += 6; state.pulse = 1; state.a.userData.halo.material.opacity = 0.7;
         const oneway = document.getElementById('oneway').checked;
         $status.textContent = oneway
           ? `kick · Bob will follow χ in ~${state.tau.toFixed(3)}s · K≈${state.K.toFixed(1)}`
@@ -332,10 +380,12 @@
       state.v += (-state.Ω*state.Ω * state.chi) * dt;
       state.chi += state.v * dt;
       state.v *= 0.995;
-      const amp = Math.min(1, Math.abs(state.chi)*0.4);
-      state.rod.material.opacity = 0.2 + amp;
-      state.b.userData.halo.material.opacity = 0.16 + amp * 0.7;
-      state.rod.scale.set(1, 1+amp*0.4, 1);
+      state.pulse = Math.max(0, (state.pulse || 0) - dt * 0.55);
+      const amp = Math.min(1, Math.abs(state.chi)*0.5 + state.pulse);
+      state.rod.material.opacity = 0.45 + amp * 0.55;
+      state.rod.material.color.setHSL(0.45, 0.9, 0.55 + 0.2*amp);
+      state.b.userData.halo.material.opacity = 0.16 + amp * 0.75;
+      state.rod.scale.set(1 + amp*1.8, 1, 1 + amp*1.8);
     }
 
     // ---------- 5. MIRAGE ----------
@@ -346,8 +396,10 @@
       html(`
         <label><span>true delay δ (ticks of light)</span><span id="dv">0.4</span></label>
         <input id="del" type="range" min="0.05" max="1.5" step="0.05" value="0.4" />
+        <div class="rng"><span>fast (fold-like)</span><span>slow</span></div>
         <label><span>clock period P</span><span id="pv">1.0</span></label>
         <input id="per" type="range" min="0.1" max="2" step="0.05" value="1.0" />
+        <div class="rng"><span>fine clock</span><span>blunt clock</span></div>
         <div class="row"><button class="primary" id="go">send</button></div>
       `);
       const a = makeLab(0xff6b4a); a.position.copy(A);
@@ -358,9 +410,15 @@
       const ringB = new THREE.Mesh(new THREE.RingGeometry(0.7, 0.85, 32), new THREE.MeshBasicMaterial({ color: 0x4aa7ff, side: THREE.DoubleSide }));
       ringA.position.copy(A); ringB.position.copy(B);
       layer.add(ringA, ringB);
-      const ph = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 8), new THREE.MeshBasicMaterial({ color: 0xfff1a8 }));
+      const ph = makePhoton();
       ph.visible = false; layer.add(ph);
-      state = { a, b, ringA, ringB, ph, flying: false, t0: 0 };
+      const ghost = makeLab(0xffe08a);
+      ghost.position.copy(B);
+      ghost.userData.halo.material.opacity = 0;
+      ghost.children[0].material.transparent = true;
+      ghost.children[0].material.opacity = 0;
+      layer.add(ghost);
+      state = { a, b, ringA, ringB, ph, ghost, flying: false, t0: 0, ghosted: false };
       const upd = () => {
         const δ = +document.getElementById('del').value;
         const P = +document.getElementById('per').value;
@@ -378,6 +436,9 @@
         state.flying = true; state.t0 = performance.now()/1000;
         state.ph.visible = true; state.ph.position.copy(A);
         state.a.userData.halo.material.opacity = 0.6;
+        state.ghosted = false;
+        state.ghost.userData.halo.material.opacity = 0;
+        state.ghost.children[0].material.opacity = 0;
       };
     }
     function tickMirage(t) {
@@ -389,6 +450,12 @@
       const tickB = Math.floor((t - state.t0) / (τ * state.P));
       state.ringA.rotation.z = (t / (τ * state.P)) * Math.PI * 2;
       state.ringB.rotation.z = state.ringA.rotation.z;
+      // ghost: coarse clock already paints Bob if δ < P (same tick)
+      if (!state.ghosted && state.δ < state.P && u > 0.05 && u < 1) {
+        state.ghosted = true;
+        state.ghost.userData.halo.material.opacity = 0.55;
+        state.ghost.children[0].material.opacity = 0.35;
+      }
       if (u >= 1) {
         state.flying = false; state.ph.visible = false;
         state.b.userData.halo.material.opacity = 0.7;
